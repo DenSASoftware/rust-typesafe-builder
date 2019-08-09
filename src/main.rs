@@ -3,12 +3,15 @@ use std::marker::PhantomData;
 use std::mem::{ManuallyDrop, transmute};
 
 /// An unconstructible-type, use it as type-information for the builder indicating a value has not
-/// been set. This could be replaced with the type from the void-crate.
+/// been set.
+#[allow(dead_code)]
 enum Unset {}
+/// Another unconstructible type, indicating a value has been set.
+enum Set {}
 
-/// A helper-function to check if the type is `Unset`
-fn is_unset<A: 'static>() -> bool {
-    TypeId::of::<A>() == TypeId::of::<Unset>()
+/// A helper-function to check if the type is `Set`
+fn is_set<A: 'static>() -> bool {
+    TypeId::of::<A>() == TypeId::of::<Set>()
 }
 
 /// The item we construct in the end. We use types that free memory on drop to show the builder
@@ -20,9 +23,10 @@ struct Item {
 }
 
 /// The builder, containing the fields that will be passed to the item and the types that are used
-/// at compile-time to check if the fields are set. A generic type either is `Unset` or the actual
-/// type of the field (`String` or `Vec<i32>` in this case). The fields are stored as
-/// `ManuallyDrop` to bypass rusts destructor because they might be uninitialized.
+/// at compile-time to check if the fields are set. A generic type either is `Unset` or `Set`,
+/// indicating whether the corresponding field has been set or not. If the field is not set it will
+/// contain uninitialized memory. The fields are stored as `ManuallyDrop` to bypass rusts destructor
+/// because they might be uninitialized.
 struct ItemBuilder<A: 'static, B: 'static> {
     a: ManuallyDrop<String>,
     b: ManuallyDrop<Vec<i32>>,
@@ -51,9 +55,9 @@ impl<A, B> ItemBuilder<A, B> {
     /// can't construct a new object with a new type because of our custom destructor we simply
     /// cast it. The builder always has the same size and memory-layout regardless of
     /// type-parameters, so this will never be an issue (i guess).
-    fn a(mut self, a: String) -> ItemBuilder<String, B> {
+    fn a(mut self, a: String) -> ItemBuilder<Set, B> {
         // if we already set a value before, drop it
-        if !is_unset::<A>() {
+        if is_set::<A>() {
             unsafe { ManuallyDrop::drop(&mut self.a); }
         }
 
@@ -62,8 +66,8 @@ impl<A, B> ItemBuilder<A, B> {
     }
 
     /// Same as `b`
-    fn b(mut self, b: Vec<i32>) -> ItemBuilder<A, Vec<i32>> {
-        if !is_unset::<B>() {
+    fn b(mut self, b: Vec<i32>) -> ItemBuilder<A, Set> {
+        if is_set::<B>() {
             unsafe { ManuallyDrop::drop(&mut self.b); }
         }
 
@@ -72,9 +76,9 @@ impl<A, B> ItemBuilder<A, B> {
     }
 }
 
-/// Implementation for constructing an `Item`. This only can be done when no field is `Unset`,
-/// meaning all fields have been set.
-impl ItemBuilder<String, Vec<i32>> {
+/// Implementation for constructing an `Item`. This only can be done when both fields are `Set`,
+/// meaning both fields are initialized
+impl ItemBuilder<Set, Set> {
     /// Consume this builder and construct an item with the values set in the builder. Do some
     /// memory-magic to avoid problems.
     fn construct(self) -> Item {
@@ -105,10 +109,10 @@ impl ItemBuilder<String, Vec<i32>> {
 /// destructor rust couldn't do better.
 impl<A, B> Drop for ItemBuilder<A, B> {
     fn drop(&mut self) {
-        if !is_unset::<A>() {
+        if is_set::<A>() {
             unsafe { ManuallyDrop::drop(&mut self.a); }
         }
-        if !is_unset::<B>() {
+        if is_set::<B>() {
             unsafe { ManuallyDrop::drop(&mut self.b); }
         }
     }
